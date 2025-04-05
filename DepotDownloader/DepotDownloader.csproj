@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>Library</OutputType>
     <TargetFramework>net9.0</TargetFramework>
+    <IncludeSymbols>true</IncludeSymbols>
+    <DebugType>embedded</DebugType>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <RollForward>LatestMajor</RollForward>
     <Version>3.0.0</Version>
@@ -12,6 +14,7 @@
     <Deterministic>true</Deterministic>
     <TreatWarningsAsErrors Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</TreatWarningsAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +28,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="Tmds.ExecFunction" Version="0.8.0" />
     <PackageReference Include="protobuf-net" Version="3.2.46" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
     <PackageReference Include="SteamKit2" Version="3.0.2" />

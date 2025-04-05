@@ -1,8 +1,6 @@
 name: SteamKit2 Continuous Integration
 
 on:
-  schedule:
-    - cron: '0 1 * * SUN'
   workflow_dispatch:
 
 jobs:

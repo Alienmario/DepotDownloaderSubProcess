@@ -36,12 +36,12 @@ namespace DepotDownloader
             GuardData = new(StringComparer.OrdinalIgnoreCase);
         }
 
-        static bool Loaded
+        public static bool Loaded
         {
-            get { return Instance != null; }
+            get { return Instance != null && Instance.FileName != null; }
         }
 
-        public static AccountSettingsStore Instance;
+        public static AccountSettingsStore Instance = new();
         static readonly IsolatedStorageFile IsolatedStorage = IsolatedStorageFile.GetUserStoreForAssembly();
 
         public static void LoadFromFile(string filename)
