@@ -148,7 +148,7 @@ namespace DepotDownloader
             DataReceivedEventHandler? errorMessageHandler = null,
             CancellationToken cancellationToken = default)
         {
-            var process = ExecFunction.Start(action, [Serialize(config)], options =>
+            var process = ExecFunction.Start(action, [Serialize(config), Environment.ProcessId.ToString()], options =>
             {
                 options.StartInfo.RedirectStandardOutput = true;
                 options.StartInfo.RedirectStandardError = true;
