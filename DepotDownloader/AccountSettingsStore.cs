@@ -74,7 +74,7 @@ namespace DepotDownloader
         public static void Save()
         {
             if (!Loaded)
-                throw new Exception("Saved config before loading");
+                return;
 
             try
             {

@@ -25,6 +25,15 @@ namespace DepotDownloader
 
         public int MaxDownloads { get; set; }
 
+        /// Relative filename within IsolatedStorage where Steam login data is stored.
+        /// Value of null disables persistence, requiring full authentication every time.
+        /// When called from CLI, "account.config" is used.
+        public string AccountSettingsFileName { get; set; }
+
+        public string Username { get; set; }
+
+        public string Password { get; set; }
+
         public bool RememberPassword { get; set; }
 
         // A Steam LoginID to allow multiple concurrent connections

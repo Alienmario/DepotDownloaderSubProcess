@@ -11,6 +11,7 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using SteamKit2;
+using SteamKit2.Authentication;
 using SteamKit2.CDN;
 
 namespace DepotDownloader
@@ -27,6 +28,7 @@ namespace DepotDownloader
         public const string DEFAULT_BRANCH = "public";
 
         public static DownloadConfig Config = new();
+        public static IAuthenticator Authenticator = new UserConsoleAuthenticator();
 
         private static Steam3Session steam3;
         private static CDNClientPool cdnPool;

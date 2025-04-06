@@ -11,6 +11,8 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
+using Microsoft.VisualBasic;
+using SteamKit2.Authentication;
 using Tmds.Utils;
 
 namespace DepotDownloader
@@ -33,39 +35,46 @@ namespace DepotDownloader
         public const int Error_General = 2;
         public const int Error_Login = 3;
 
+        /// Messages starting with this string are control messages. Used for communicating with the parent process.
+        internal const string MagicMessage = "$DDSPMM*";
+        /// Delimiter by which individual args of control messages are separated.
+        internal const char MagicMessageDelimiter = ControlChars.NullChar;
+
         public static IAsyncEnumerable<(string msg, bool isError)> AppDownload(
             AppDownloadConfig config,
             Action<int>? exitHandler = null,
+            IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
-            return ExecInProcess(AppDownloadInner, config, exitHandler, cancellationToken);
+            return ExecInProcess(AppDownloadInner, config, exitHandler, authenticator, cancellationToken);
         }
 
         public static Task<int> AppDownload(AppDownloadConfig config,
             DataReceivedEventHandler? messageHandler = null,
             DataReceivedEventHandler? errorMessageHandler = null,
+            IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
-            return ExecInProcess(AppDownloadInner, config, messageHandler, errorMessageHandler, cancellationToken);
+            return ExecInProcess(AppDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
         }
 
         private static async Task<int> AppDownloadInner(string[] input)
         {
+            InitSubProcess(input);
             var cfg = Deserialize<AppDownloadConfig>(input[0]);
-            var parentProcess = Process.GetProcessById(Convert.ToInt32(input[1]));
-            parentProcess.EnableRaisingEvents = true;
-            parentProcess.Exited += (sender, args) =>
-            {
-                Process.GetCurrentProcess().Kill(true);
-            };
 
             if (cfg.MaxDownloads <= 0)
                 cfg.MaxDownloads = 8;
 
-            ContentDownloader.Config = cfg;
+            if (cfg.AccountSettingsFileName != null)
+            {
+                AccountSettingsStore.LoadFromFile(cfg.AccountSettingsFileName);
+            }
 
-            // Todo login handling
-            if (!ContentDownloader.InitializeSteam3(null, null))
+            ContentDownloader.Config = cfg;
+            ContentDownloader.Authenticator = new SubProcessAuthenticator();
+
+            if (!ContentDownloader.InitializeSteam3(cfg.Username, cfg.Password))
             {
                 return Error_Login;
             }
@@ -73,7 +82,7 @@ namespace DepotDownloader
             try
             {
                 await ContentDownloader.DownloadAppAsync(cfg.AppId, cfg.DepotManifestIds, cfg.Branch, cfg.OS, cfg.Arch,
-                    cfg.Language, cfg.LowViolence, false);
+                    cfg.Language, cfg.LowViolence, false).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is ContentDownloaderException or OperationCanceledException)
             {
@@ -97,30 +106,38 @@ namespace DepotDownloader
             Func<string[], Task<int>> action,
             object config,
             Action<int>? exitHandler = null,
+            IAuthenticator? authenticator = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var process = ExecFunction.Start(action, [Serialize(config), Environment.ProcessId.ToString()], options =>
             {
                 options.StartInfo.RedirectStandardOutput = true;
                 options.StartInfo.RedirectStandardError = true;
+                options.StartInfo.RedirectStandardInput = true;
             });
             try
             {
-                Task<string?>? readOutputTask = null;
-                Task<string?>? readErrorTask = null;
+                Task<string?>?[] readStreamTasks = [null, null];
                 while (!process.HasExited)
                 {
-                    if (readOutputTask == null || readOutputTask.IsCompleted)
-                        readOutputTask = process.StandardOutput.ReadLineAsync(cancellationToken).AsTask();
-                    if (readErrorTask == null || readErrorTask.IsCompleted)
-                        readErrorTask = process.StandardError.ReadLineAsync(cancellationToken).AsTask();
-                    var completedTask = await Task.WhenAny(readOutputTask, readErrorTask);
+                    readStreamTasks[0] ??= process.StandardOutput.ReadLineAsync(cancellationToken).AsTask();
+                    readStreamTasks[1] ??= process.StandardError.ReadLineAsync(cancellationToken).AsTask();
+                    var completedTask = await Task.WhenAny(readStreamTasks!).ConfigureAwait(false);
 
                     var message = completedTask.Result;
                     if (message != null)
                     {
-                        yield return (message, completedTask == readErrorTask);
+                        var isError = completedTask == readStreamTasks[1];
+                        if (!isError && message.StartsWith(MagicMessage))
+                        {
+                            await ProcessMagicMessage(message, process, authenticator).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            yield return (message, isError);
+                        }
                     }
+                    readStreamTasks[Array.IndexOf(readStreamTasks, completedTask)] = null;
                 }
             }
             finally
@@ -141,31 +158,42 @@ namespace DepotDownloader
         }
 
         /// Executes given action in a new process, returning an awaitable task.
-        public static async Task<int> ExecInProcess(
+        private static async Task<int> ExecInProcess(
             Func<string[], Task<int>> action,
             object config,
             DataReceivedEventHandler? messageHandler = null,
             DataReceivedEventHandler? errorMessageHandler = null,
+            IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
             var process = ExecFunction.Start(action, [Serialize(config), Environment.ProcessId.ToString()], options =>
             {
                 options.StartInfo.RedirectStandardOutput = true;
                 options.StartInfo.RedirectStandardError = true;
+                options.StartInfo.RedirectStandardInput = true;
             });
             try
             {
-                if (messageHandler != null)
+                process.OutputDataReceived += async (sender, args) =>
                 {
-                    process.OutputDataReceived += messageHandler;
-                    process.BeginOutputReadLine();
-                }
+                    if (args.Data != null && args.Data.StartsWith(MagicMessage))
+                    {
+                        await ProcessMagicMessage(args.Data, process, authenticator).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        messageHandler?.Invoke(sender, args);
+                    }
+                };
+                process.BeginOutputReadLine();
+
                 if (errorMessageHandler != null)
                 {
                     process.ErrorDataReceived += errorMessageHandler;
                     process.BeginErrorReadLine();
                 }
-                await process.WaitForExitAsync(cancellationToken);
+
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -183,6 +211,81 @@ namespace DepotDownloader
             }
         }
 
+        private static void InitSubProcess(string[] input)
+        {
+            var parentProcess = Process.GetProcessById(Convert.ToInt32(input[1]));
+            parentProcess.EnableRaisingEvents = true;
+            parentProcess.Exited += (sender, args) =>
+            {
+                Process.GetCurrentProcess().Kill(true);
+            };
+        }
+
+        private static async Task ProcessMagicMessage(string message, Process subprocess, IAuthenticator? authenticator)
+        {
+            var args = message[(MagicMessage.Length + 1)..].Split(MagicMessageDelimiter);
+            if (args.Length == 0)
+                return;
+
+            switch (args[0])
+            {
+                case "GetDeviceCode" or "GetEmailCode" or "AcceptDeviceConfirmation" when authenticator == null:
+                    throw new InvalidOperationException("Authenticator instance is required");
+
+                case "GetDeviceCode":
+                {
+                    var previousCodeWasIncorrect = Convert.ToBoolean(args[1]);
+
+                    var code = await authenticator
+                        .GetDeviceCodeAsync(previousCodeWasIncorrect)
+                        .ConfigureAwait(false);
+                    await subprocess.StandardInput
+                        .WriteLineAsync(code)
+                        .ConfigureAwait(false);
+                    break;
+                }
+                case "GetEmailCode":
+                {
+                    var email = args[1];
+                    var previousCodeWasIncorrect = Convert.ToBoolean(args[2]);
+
+                    var code = await authenticator
+                        .GetEmailCodeAsync(email, previousCodeWasIncorrect)
+                        .ConfigureAwait(false);
+                    await subprocess.StandardInput
+                        .WriteLineAsync(code)
+                        .ConfigureAwait(false);
+                    break;
+                }
+                case "AcceptDeviceConfirmation":
+                {
+                    var acceptDeviceConfirmation= await authenticator
+                        .AcceptDeviceConfirmationAsync()
+                        .ConfigureAwait(false);
+                    await subprocess.StandardInput
+                        .WriteLineAsync(Convert.ToString(acceptDeviceConfirmation))
+                        .ConfigureAwait(false);
+                    break;
+                }
+            }
+        }
+
+        internal static void SendMagicMessage(params object[] args)
+        {
+            Console.WriteLine(string.Join(MagicMessageDelimiter, [MagicMessage, ..args]));
+        }
+
+        internal static string WaitForResponse()
+        {
+            string? line;
+            do
+            {
+                line = Console.ReadLine();
+            }
+            while (line == null);
+            return line;
+        }
+
         private static string Serialize(object obj)
         {
             var xmlSerializer = new XmlSerializer(obj.GetType());
@@ -196,6 +299,27 @@ namespace DepotDownloader
             var xmlSerializer = new XmlSerializer(typeof(T));
             using var stringReader = new StringReader(str);
             return (T)xmlSerializer.Deserialize(stringReader)!;
+        }
+    }
+
+    internal class SubProcessAuthenticator : IAuthenticator
+    {
+        public Task<string> GetDeviceCodeAsync(bool previousCodeWasIncorrect)
+        {
+            SubProcess.SendMagicMessage("GetDeviceCode", previousCodeWasIncorrect);
+            return Task.FromResult(SubProcess.WaitForResponse());
+        }
+
+        public Task<string> GetEmailCodeAsync(string email, bool previousCodeWasIncorrect)
+        {
+            SubProcess.SendMagicMessage("GetEmailCode", email, previousCodeWasIncorrect);
+            return Task.FromResult(SubProcess.WaitForResponse());
+        }
+
+        public Task<bool> AcceptDeviceConfirmationAsync()
+        {
+            SubProcess.SendMagicMessage("AcceptDeviceConfirmation");
+            return Task.FromResult(Convert.ToBoolean(SubProcess.WaitForResponse()));
         }
     }
 }
