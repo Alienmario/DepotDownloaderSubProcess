@@ -259,7 +259,7 @@ namespace DepotDownloader
                 }
                 case "AcceptDeviceConfirmation":
                 {
-                    var acceptDeviceConfirmation= await authenticator
+                    var acceptDeviceConfirmation = await authenticator
                         .AcceptDeviceConfirmationAsync()
                         .ConfigureAwait(false);
                     await subprocess.StandardInput
@@ -272,7 +272,7 @@ namespace DepotDownloader
 
         internal static void SendMagicMessage(params object[] args)
         {
-            Console.WriteLine(string.Join(MagicMessageDelimiter, [MagicMessage, ..args]));
+            Console.WriteLine(string.Join(MagicMessageDelimiter, [MagicMessage, .. args]));
         }
 
         internal static string WaitForResponse()
