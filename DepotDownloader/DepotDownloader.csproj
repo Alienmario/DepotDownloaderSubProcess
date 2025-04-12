@@ -6,10 +6,6 @@
     <DebugType>embedded</DebugType>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <RollForward>LatestMajor</RollForward>
-    <Version>3.0.0</Version>
-    <Description>Steam Downloading Utility</Description>
-    <Authors>SteamRE Team</Authors>
-    <Copyright>Copyright © SteamRE Team 2025</Copyright>
     <ApplicationIcon>..\Icon\DepotDownloader.ico</ApplicationIcon>
     <Deterministic>true</Deterministic>
     <TreatWarningsAsErrors Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</TreatWarningsAsErrors>
@@ -17,10 +13,23 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <PackageId>DepotDownloaderSubProcess</PackageId>
+    <Version>3.1.0</Version>
+    <Description>Library for running "Steam depot downloader" in a sub-process.</Description>
+    <Authors>Alienmario, SteamRE Team</Authors>
+    <Copyright>Copyright © SteamRE Team 2025</Copyright>
+    <RepositoryUrl>https://github.com/Alienmario/DepotDownloaderSubProcess</RepositoryUrl>
+    <PackageTags>Steam,depot,downloader</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+  </PropertyGroup>
+
   <ItemGroup>
-    <None Include="..\LICENSE" Link="LICENSE">
+    <None Include="..\LICENSE" Link="LICENSE" Pack="true" PackagePath="\">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Include="..\README.md" Pack="true" PackagePath="\"/>
   </ItemGroup>
 
   <ItemGroup>
