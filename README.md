@@ -1,5 +1,8 @@
 DepotDownloaderSubProcess
 ===============
+[![NuGet Version](https://img.shields.io/nuget/v/DepotDownloaderSubProcess)](https://www.nuget.org/packages/DepotDownloaderSubProcess)
+[![.NET Core CI](https://github.com/Alienmario/DepotDownloaderSubProcess/actions/workflows/build.yml/badge.svg)](https://github.com/Alienmario/DepotDownloaderSubProcess/actions/workflows/build.yml)
+
 
 A C# API wrapping `Steam depot downloader` in a sub-process utilizing `Tmds.ExecFunction` library.
 
