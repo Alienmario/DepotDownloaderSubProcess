@@ -118,6 +118,7 @@ cryptopp/
 
 # misc
 Thumbs.db
+launchSettings.json
 
 # Jetbrains Rider
 .idea
