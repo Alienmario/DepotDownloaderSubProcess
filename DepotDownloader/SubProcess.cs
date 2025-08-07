@@ -28,6 +28,18 @@ namespace DepotDownloader
         public bool LowViolence { get; set; }
     }
 
+    public class PubFileDownloadConfig : DownloadConfig
+    {
+        public uint AppId { get; set; }
+        public ulong PublishedFileId { get; set; }
+    }
+
+    public class UGCDownloadConfig : DownloadConfig
+    {
+        public uint AppId { get; set; }
+        public ulong UGCId { get; set; }
+    }
+
     public static class SubProcess
     {
         public const int Success = 0;
@@ -49,7 +61,8 @@ namespace DepotDownloader
             return ExecInProcess(AppDownloadInner, config, exitHandler, authenticator, cancellationToken);
         }
 
-        public static Task<int> AppDownload(AppDownloadConfig config,
+        public static Task<int> AppDownload(
+            AppDownloadConfig config,
             DataReceivedEventHandler? messageHandler = null,
             DataReceivedEventHandler? errorMessageHandler = null,
             IAuthenticator? authenticator = null,
@@ -58,21 +71,47 @@ namespace DepotDownloader
             return ExecInProcess(AppDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
         }
 
+        public static IAsyncEnumerable<(string msg, bool isError)> PubFileDownload(
+            PubFileDownloadConfig config,
+            Action<int>? exitHandler = null,
+            IAuthenticator? authenticator = null,
+            CancellationToken cancellationToken = default)
+        {
+            return ExecInProcess(PubFileDownloadInner, config, exitHandler, authenticator, cancellationToken);
+        }
+
+        public static Task<int> PubFileDownload(
+            PubFileDownloadConfig config,
+            DataReceivedEventHandler? messageHandler = null,
+            DataReceivedEventHandler? errorMessageHandler = null,
+            IAuthenticator? authenticator = null,
+            CancellationToken cancellationToken = default)
+        {
+            return ExecInProcess(PubFileDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
+        }
+
+        public static IAsyncEnumerable<(string msg, bool isError)> UGCDownload(
+            UGCDownloadConfig config,
+            Action<int>? exitHandler = null,
+            IAuthenticator? authenticator = null,
+            CancellationToken cancellationToken = default)
+        {
+            return ExecInProcess(UGCDownloadInner, config, exitHandler, authenticator, cancellationToken);
+        }
+
+        public static Task<int> UGCDownload(
+            UGCDownloadConfig config,
+            DataReceivedEventHandler? messageHandler = null,
+            DataReceivedEventHandler? errorMessageHandler = null,
+            IAuthenticator? authenticator = null,
+            CancellationToken cancellationToken = default)
+        {
+            return ExecInProcess(UGCDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
+        }
+
         private static async Task<int> AppDownloadInner(string[] input)
         {
-            InitSubProcess(input);
-            var cfg = Deserialize<AppDownloadConfig>(input[0]);
-
-            if (cfg.MaxDownloads <= 0)
-                cfg.MaxDownloads = 8;
-
-            if (cfg.AccountSettingsFileName != null)
-            {
-                AccountSettingsStore.LoadFromFile(cfg.AccountSettingsFileName);
-            }
-
-            ContentDownloader.Config = cfg;
-            ContentDownloader.Authenticator = new SubProcessAuthenticator();
+            var cfg = InitSubProcess<AppDownloadConfig>(input);
 
             if (!ContentDownloader.InitializeSteam3(cfg.Username, cfg.Password))
             {
@@ -83,6 +122,7 @@ namespace DepotDownloader
             {
                 await ContentDownloader.DownloadAppAsync(cfg.AppId, cfg.DepotManifestIds, cfg.Branch, cfg.OS, cfg.Arch,
                     cfg.Language, cfg.LowViolence, false).ConfigureAwait(false);
+                return Success;
             }
             catch (Exception ex) when (ex is ContentDownloaderException or OperationCanceledException)
             {
@@ -98,7 +138,66 @@ namespace DepotDownloader
             {
                 ContentDownloader.ShutdownSteam3();
             }
-            return Success;
+        }
+
+        private static async Task<int> PubFileDownloadInner(string[] input)
+        {
+            var cfg = InitSubProcess<PubFileDownloadConfig>(input);
+
+            if (!ContentDownloader.InitializeSteam3(cfg.Username, cfg.Password))
+            {
+                return Error_Login;
+            }
+
+            try
+            {
+                await ContentDownloader.DownloadPubfileAsync(cfg.AppId, cfg.PublishedFileId).ConfigureAwait(false);
+                return Success;
+            }
+            catch (Exception ex) when (ex is ContentDownloaderException or OperationCanceledException)
+            {
+                Console.WriteLine(ex.Message);
+                return Error_General;
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine("Download failed to due to an unhandled exception: {0}", e.Message);
+                return Error_Unknown;
+            }
+            finally
+            {
+                ContentDownloader.ShutdownSteam3();
+            }
+        }
+
+        private static async Task<int> UGCDownloadInner(string[] input)
+        {
+            var cfg = InitSubProcess<UGCDownloadConfig>(input);
+
+            if (!ContentDownloader.InitializeSteam3(cfg.Username, cfg.Password))
+            {
+                return Error_Login;
+            }
+
+            try
+            {
+                await ContentDownloader.DownloadUGCAsync(cfg.AppId, cfg.UGCId).ConfigureAwait(false);
+                return Success;
+            }
+            catch (Exception ex) when (ex is ContentDownloaderException or OperationCanceledException)
+            {
+                Console.WriteLine(ex.Message);
+                return Error_General;
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine("Download failed to due to an unhandled exception: {0}", e.Message);
+                return Error_Unknown;
+            }
+            finally
+            {
+                ContentDownloader.ShutdownSteam3();
+            }
         }
 
         /// Executes given action in a new process, returning an IAsyncEnumerable that yields for every console message.
@@ -211,14 +310,29 @@ namespace DepotDownloader
             }
         }
 
-        private static void InitSubProcess(string[] input)
+        private static T InitSubProcess<T>(string[] input) where T : DownloadConfig
         {
+            var cfg = Deserialize<T>(input[0]);
+
+            if (cfg.MaxDownloads <= 0)
+            {
+                cfg.MaxDownloads = 8;
+            }
+            if (cfg.AccountSettingsFileName != null)
+            {
+                AccountSettingsStore.LoadFromFile(cfg.AccountSettingsFileName);
+            }
+            ContentDownloader.Config = cfg;
+            ContentDownloader.Authenticator = new SubProcessAuthenticator();
+
             var parentProcess = Process.GetProcessById(Convert.ToInt32(input[1]));
             parentProcess.EnableRaisingEvents = true;
             parentProcess.Exited += (sender, args) =>
             {
                 Process.GetCurrentProcess().Kill(true);
             };
+
+            return cfg;
         }
 
         private static async Task ProcessMagicMessage(string message, Process subprocess, IAuthenticator? authenticator)
