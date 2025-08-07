@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFramework>net9.0</TargetFramework>
@@ -15,7 +15,7 @@
 
   <PropertyGroup>
     <PackageId>DepotDownloaderSubProcess</PackageId>
-    <Version>3.3.0</Version>
+    <Version>3.4.0</Version>
     <Description>Library for running "Steam depot downloader" in a sub-process.</Description>
     <Authors>Alienmario, SteamRE Team</Authors>
     <Copyright>Copyright © SteamRE Team 2025</Copyright>
@@ -40,6 +40,6 @@
     <PackageReference Include="Tmds.ExecFunction" Version="0.8.0" />
     <PackageReference Include="protobuf-net" Version="3.2.52" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
-    <PackageReference Include="SteamKit2" Version="3.1.0" />
+    <PackageReference Include="SteamKit2" Version="3.3.0" />
   </ItemGroup>
 </Project>
