@@ -25,6 +25,7 @@ public static int Main(string[] args)
 }
 ```
 ### App download
+Prepare call:
 ```c#
 CancellationTokenSource cts = new CancellationTokenSource();
 
@@ -38,7 +39,7 @@ var cfg = new DepotDownloader.AppDownloadConfig
     AppId = 244310
 };
 ```
-A) Using an async enumerable:
+Method A) Using an async enumerable:
 ```c#
 int? exitCode = null;
 await foreach ((string message, bool error) in DepotDownloader.SubProcess.AppDownload(
@@ -52,7 +53,7 @@ if (exitCode != DepotDownloader.SubProcess.Success)
     Console.WriteLine("Download failed");
 }
 ```
-B) Using a task and callbacks:
+Method B) Using a task and message callbacks:
 ```c#
 void MessageHandler(object sender, DataReceivedEventArgs e)
 {
@@ -66,4 +67,25 @@ if (exitCode != DepotDownloader.SubProcess.Success)
 {
     Console.WriteLine("Download failed");
 }
+```
+### Pubfile (Workshop) download
+Pubfile download is similiar to App download, but uses `PubFileDownloadConfig` :
+```c#
+var cfg = new DepotDownloader.PubFileDownloadConfig
+{
+    AppId = ...,
+    PublishedFileId = ...
+};
+DepotDownloader.SubProcess.PubFileDownload(cfg, ...)
+```
+
+### UGC (Workshop) download
+UGC download is similiar to App download, but uses `UGCDownloadConfig` :
+```c#
+var cfg = new DepotDownloader.UGCDownloadConfig
+{
+    AppId = ...,
+    UGCId = ...
+};
+DepotDownloader.SubProcess.UGCDownload(cfg, ...)
 ```
