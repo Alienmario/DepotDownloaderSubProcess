@@ -9,6 +9,10 @@ A C# API wrapping `Steam depot downloader` in a sub-process utilizing `Tmds.Exec
 This avoids many pitfalls of calling the original utility that has been specifically written for CLI usage.
 Original code remains largely unchanged to facilitate easy sync with upstream.
 
+> [!WARNING]
+> Does not support trimming or AOT - this stems from DepotDownloader itself.  
+> Make sure `<PublishTrimmed>` and `<PublishAot>` are not true.
+
 ## Usage
 
 As per [ExecFunction](https://github.com/tmds/Tmds.ExecFunction) documentation, add the following to your Main method.
