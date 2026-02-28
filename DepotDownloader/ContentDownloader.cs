@@ -170,11 +170,13 @@ namespace DepotDownloader
             return section_kv;
         }
 
-        static uint GetSteam3AppBuildNumber(uint appId, string branch)
+        internal static uint GetSteam3AppBuildNumber(uint appId, string branch)
         {
             if (appId == INVALID_APP_ID)
                 return 0;
 
+            // DepotDownloaderSubProcess: init for GetAppBuildId
+            Task.Run(async () => await steam3!.RequestAppInfo(appId)).Wait();
 
             var depots = GetSteam3AppSection(appId, EAppInfoSection.Depots);
             var branches = depots["branches"];

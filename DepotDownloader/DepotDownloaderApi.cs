@@ -6,11 +6,10 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Xml.Serialization;
 using Microsoft.VisualBasic;
 using SteamKit2.Authentication;
 using Tmds.Utils;
@@ -40,73 +39,106 @@ namespace DepotDownloader
         public ulong UGCId { get; set; }
     }
 
-    public static class SubProcess
+    public class GetAppBuildIdConfig
     {
-        public const int Success = 0;
-        public const int Error_Unknown = 1;
-        public const int Error_General = 2;
-        public const int Error_Login = 3;
+        public uint AppId { get; set; }
+        public string Branch { get; set; } = ContentDownloader.DEFAULT_BRANCH;
+    }
 
+    public class DepotDownloaderApiException(int code, string? message) : Exception(message)
+    {
+        public const int UnknownError = 1;
+        public const int GeneralError = 2;
+        public const int LoginError = 3;
+
+        public int Code { get; } = code;
+
+        public DepotDownloaderApiException(int code) : this(code, code switch
+        {
+            UnknownError => "Unknown error",
+            GeneralError => "General error",
+            LoginError => "Login error",
+            _ => null
+        })
+        { }
+    }
+
+    /// <summary>
+    /// Provides API capability for the DepotDownloader utility.
+    /// </summary>
+    public static class DepotDownloaderApi
+    {
         /// Messages starting with this string are control messages. Used for communicating with the parent process.
         internal const string MagicMessage = "$DDSPMM*";
         /// Delimiter by which individual args of control messages are separated.
         internal const char MagicMessageDelimiter = ControlChars.NullChar;
 
+        /// <exception cref="DepotDownloaderApiException"></exception>
         public static IAsyncEnumerable<(string msg, bool isError)> AppDownload(
             AppDownloadConfig config,
-            Action<int>? exitHandler = null,
             IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
-            return ExecInProcess(AppDownloadInner, config, exitHandler, authenticator, cancellationToken);
+            return ExecInProcess<object?>(AppDownloadInner, config, null, authenticator, cancellationToken);
         }
 
-        public static Task<int> AppDownload(
+        /// <exception cref="DepotDownloaderApiException"></exception>
+        public static Task AppDownload(
             AppDownloadConfig config,
-            DataReceivedEventHandler? messageHandler = null,
-            DataReceivedEventHandler? errorMessageHandler = null,
+            DataReceivedEventHandler? messageHandler,
+            DataReceivedEventHandler? errorMessageHandler,
             IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
-            return ExecInProcess(AppDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
+            return ExecInProcess<object?>(AppDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
         }
 
+        /// <exception cref="DepotDownloaderApiException"></exception>
         public static IAsyncEnumerable<(string msg, bool isError)> PubFileDownload(
             PubFileDownloadConfig config,
-            Action<int>? exitHandler = null,
             IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
-            return ExecInProcess(PubFileDownloadInner, config, exitHandler, authenticator, cancellationToken);
+            return ExecInProcess<object?>(PubFileDownloadInner, config, null, authenticator, cancellationToken);
         }
 
-        public static Task<int> PubFileDownload(
+        /// <exception cref="DepotDownloaderApiException"></exception>
+        public static Task PubFileDownload(
             PubFileDownloadConfig config,
             DataReceivedEventHandler? messageHandler = null,
             DataReceivedEventHandler? errorMessageHandler = null,
             IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
-            return ExecInProcess(PubFileDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
+            return ExecInProcess<object?>(PubFileDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
         }
 
+        /// <exception cref="DepotDownloaderApiException"></exception>
         public static IAsyncEnumerable<(string msg, bool isError)> UGCDownload(
             UGCDownloadConfig config,
-            Action<int>? exitHandler = null,
             IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
-            return ExecInProcess(UGCDownloadInner, config, exitHandler, authenticator, cancellationToken);
+            return ExecInProcess<object?>(UGCDownloadInner, config, null, authenticator, cancellationToken);
         }
 
-        public static Task<int> UGCDownload(
+        /// <exception cref="DepotDownloaderApiException"></exception>
+        public static Task UGCDownload(
             UGCDownloadConfig config,
             DataReceivedEventHandler? messageHandler = null,
             DataReceivedEventHandler? errorMessageHandler = null,
             IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
-            return ExecInProcess(UGCDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
+            return ExecInProcess<object?>(UGCDownloadInner, config, messageHandler, errorMessageHandler, authenticator, cancellationToken);
+        }
+
+        /// <exception cref="DepotDownloaderApiException"></exception>
+        public static Task<uint> GetAppBuildId(
+            GetAppBuildIdConfig config,
+            CancellationToken cancellationToken = default)
+        {
+            return ExecInProcess<uint>(GetAppBuildIdInner, config, null, null, null, cancellationToken);
         }
 
         private static async Task<int> AppDownloadInner(string[] input)
@@ -115,24 +147,24 @@ namespace DepotDownloader
 
             if (!ContentDownloader.InitializeSteam3(cfg.Username, cfg.Password))
             {
-                return Error_Login;
+                return DepotDownloaderApiException.LoginError;
             }
 
             try
             {
                 await ContentDownloader.DownloadAppAsync(cfg.AppId, cfg.DepotManifestIds, cfg.Branch, cfg.OS, cfg.Arch,
                     cfg.Language, cfg.LowViolence, false).ConfigureAwait(false);
-                return Success;
+                return 0;
             }
             catch (Exception ex) when (ex is ContentDownloaderException or OperationCanceledException)
             {
                 Console.WriteLine(ex.Message);
-                return Error_General;
+                return DepotDownloaderApiException.GeneralError;
             }
             catch (Exception e)
             {
-                Console.Error.WriteLine("Download failed to due to an unhandled exception: {0}", e.Message);
-                return Error_Unknown;
+                Console.Error.WriteLine("Download failed due to an unhandled exception: {0}", e.Message);
+                return DepotDownloaderApiException.UnknownError;
             }
             finally
             {
@@ -146,23 +178,23 @@ namespace DepotDownloader
 
             if (!ContentDownloader.InitializeSteam3(cfg.Username, cfg.Password))
             {
-                return Error_Login;
+                return DepotDownloaderApiException.LoginError;
             }
 
             try
             {
                 await ContentDownloader.DownloadPubfileAsync(cfg.AppId, cfg.PublishedFileId).ConfigureAwait(false);
-                return Success;
+                return 0;
             }
             catch (Exception ex) when (ex is ContentDownloaderException or OperationCanceledException)
             {
                 Console.WriteLine(ex.Message);
-                return Error_General;
+                return DepotDownloaderApiException.GeneralError;
             }
             catch (Exception e)
             {
-                Console.Error.WriteLine("Download failed to due to an unhandled exception: {0}", e.Message);
-                return Error_Unknown;
+                Console.Error.WriteLine("Download failed due to an unhandled exception: {0}", e.Message);
+                return DepotDownloaderApiException.UnknownError;
             }
             finally
             {
@@ -176,23 +208,49 @@ namespace DepotDownloader
 
             if (!ContentDownloader.InitializeSteam3(cfg.Username, cfg.Password))
             {
-                return Error_Login;
+                return DepotDownloaderApiException.LoginError;
             }
 
             try
             {
                 await ContentDownloader.DownloadUGCAsync(cfg.AppId, cfg.UGCId).ConfigureAwait(false);
-                return Success;
+                return 0;
             }
             catch (Exception ex) when (ex is ContentDownloaderException or OperationCanceledException)
             {
                 Console.WriteLine(ex.Message);
-                return Error_General;
+                return DepotDownloaderApiException.GeneralError;
             }
             catch (Exception e)
             {
-                Console.Error.WriteLine("Download failed to due to an unhandled exception: {0}", e.Message);
-                return Error_Unknown;
+                Console.Error.WriteLine("Download failed due to an unhandled exception: {0}", e.Message);
+                return DepotDownloaderApiException.UnknownError;
+            }
+            finally
+            {
+                ContentDownloader.ShutdownSteam3();
+            }
+        }
+
+        private static Task<int> GetAppBuildIdInner(string[] input)
+        {
+            var cfg = InitSubProcess<GetAppBuildIdConfig>(input);
+
+            if (!ContentDownloader.InitializeSteam3(null, null))
+            {
+                return Task.FromResult(DepotDownloaderApiException.LoginError);
+            }
+
+            try
+            {
+                var buildId = ContentDownloader.GetSteam3AppBuildNumber(cfg.AppId, cfg.Branch);
+                SetReturnValue(buildId);
+                return Task.FromResult(0);
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine(e.Message);
+                return Task.FromResult(DepotDownloaderApiException.UnknownError);
             }
             finally
             {
@@ -201,14 +259,15 @@ namespace DepotDownloader
         }
 
         /// Executes given action in a new process, returning an IAsyncEnumerable that yields for every console message.
-        private static async IAsyncEnumerable<(string msg, bool isError)> ExecInProcess(
-            Func<string[], Task<int>> action,
+        /// <exception cref="DepotDownloaderApiException"></exception>
+        private static async IAsyncEnumerable<(string msg, bool isError)> ExecInProcess<R>(
+            Func<string[], Task<int>> innerFunc,
             object config,
-            Action<int>? exitHandler = null,
+            Action<R>? returnValueProcessor = null,
             IAuthenticator? authenticator = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var process = ExecFunction.Start(action, [Serialize(config), Environment.ProcessId.ToString()], options =>
+            var process = ExecFunction.Start(innerFunc, [Serialize(config), Environment.ProcessId.ToString()], options =>
             {
                 options.StartInfo.RedirectStandardOutput = true;
                 options.StartInfo.RedirectStandardError = true;
@@ -229,7 +288,8 @@ namespace DepotDownloader
                         var isError = completedTask == readStreamTasks[1];
                         if (!isError && message.StartsWith(MagicMessage))
                         {
-                            await ProcessMagicMessage(message, process, authenticator).ConfigureAwait(false);
+                            await ProcessMagicMessage(message, process, authenticator, returnValueProcessor)
+                                .ConfigureAwait(false);
                         }
                         else
                         {
@@ -245,27 +305,25 @@ namespace DepotDownloader
                     process.Kill(true);
             }
 
-            var exitCode = Error_Unknown;
-            try
+            var exitCode = process.ExitCode;
+            if (exitCode != 0)
             {
-                exitCode = process.ExitCode;
-            }
-            finally
-            {
-                exitHandler?.Invoke(exitCode);
+                throw new DepotDownloaderApiException(exitCode);
             }
         }
 
         /// Executes given action in a new process, returning an awaitable task.
-        private static async Task<int> ExecInProcess(
-            Func<string[], Task<int>> action,
+        /// <exception cref="DepotDownloaderApiException"></exception>
+        private static async Task<R?> ExecInProcess<R>(
+            Func<string[], Task<int>> innerFunc,
             object config,
             DataReceivedEventHandler? messageHandler = null,
             DataReceivedEventHandler? errorMessageHandler = null,
             IAuthenticator? authenticator = null,
             CancellationToken cancellationToken = default)
         {
-            var process = ExecFunction.Start(action, [Serialize(config), Environment.ProcessId.ToString()], options =>
+            R? returnValue = default;
+            var process = ExecFunction.Start(innerFunc, [Serialize(config), Environment.ProcessId.ToString()], options =>
             {
                 options.StartInfo.RedirectStandardOutput = true;
                 options.StartInfo.RedirectStandardError = true;
@@ -277,7 +335,8 @@ namespace DepotDownloader
                 {
                     if (args.Data != null && args.Data.StartsWith(MagicMessage))
                     {
-                        await ProcessMagicMessage(args.Data, process, authenticator).ConfigureAwait(false);
+                        await ProcessMagicMessage<R>(args.Data, process, authenticator, r => returnValue = r)
+                            .ConfigureAwait(false);
                     }
                     else
                     {
@@ -300,29 +359,30 @@ namespace DepotDownloader
                     process.Kill(true);
             }
 
-            try
+            var exitCode = process.ExitCode;
+            if (exitCode != 0)
             {
-                return process.ExitCode;
+                throw new DepotDownloaderApiException(exitCode);
             }
-            catch
-            {
-                return Error_Unknown;
-            }
+            return returnValue;
         }
 
-        private static T InitSubProcess<T>(string[] input) where T : DownloadConfig
+        private static T InitSubProcess<T>(string[] input)
         {
             var cfg = Deserialize<T>(input[0]);
 
-            if (cfg.MaxDownloads <= 0)
+            if (cfg is DownloadConfig dcfg)
             {
-                cfg.MaxDownloads = 8;
+                if (dcfg.MaxDownloads <= 0)
+                {
+                    dcfg.MaxDownloads = 8;
+                }
+                if (dcfg.AccountSettingsFileName != null)
+                {
+                    AccountSettingsStore.LoadFromFile(dcfg.AccountSettingsFileName);
+                }
+                ContentDownloader.Config = dcfg;
             }
-            if (cfg.AccountSettingsFileName != null)
-            {
-                AccountSettingsStore.LoadFromFile(cfg.AccountSettingsFileName);
-            }
-            ContentDownloader.Config = cfg;
             ContentDownloader.Authenticator = new SubProcessAuthenticator();
 
             var parentProcess = Process.GetProcessById(Convert.ToInt32(input[1]));
@@ -335,7 +395,10 @@ namespace DepotDownloader
             return cfg;
         }
 
-        private static async Task ProcessMagicMessage(string message, Process subprocess, IAuthenticator? authenticator)
+        private static async Task ProcessMagicMessage<R>(string message,
+            Process subprocess,
+            IAuthenticator? authenticator,
+            Action<R>? returnValueProcessor)
         {
             var args = message[(MagicMessage.Length + 1)..].Split(MagicMessageDelimiter);
             if (args.Length == 0)
@@ -381,7 +444,18 @@ namespace DepotDownloader
                         .ConfigureAwait(false);
                     break;
                 }
+                case "SetReturnValue" when returnValueProcessor != null:
+                {
+                    var returnValue = Deserialize<R>(args[1]);
+                    returnValueProcessor(returnValue);
+                    break;
+                }
             }
+        }
+
+        internal static void SetReturnValue(object returnValue)
+        {
+            SendMagicMessage("SetReturnValue", Serialize(returnValue));
         }
 
         internal static void SendMagicMessage(params object[] args)
@@ -402,17 +476,12 @@ namespace DepotDownloader
 
         private static string Serialize(object obj)
         {
-            var xmlSerializer = new XmlSerializer(obj.GetType());
-            using var stringWriter = new StringWriter();
-            xmlSerializer.Serialize(stringWriter, obj);
-            return stringWriter.ToString();
+            return JsonSerializer.Serialize(obj);
         }
 
         private static T Deserialize<T>(string str)
         {
-            var xmlSerializer = new XmlSerializer(typeof(T));
-            using var stringReader = new StringReader(str);
-            return (T)xmlSerializer.Deserialize(stringReader)!;
+            return JsonSerializer.Deserialize<T>(str)!;
         }
     }
 
@@ -420,20 +489,20 @@ namespace DepotDownloader
     {
         public Task<string> GetDeviceCodeAsync(bool previousCodeWasIncorrect)
         {
-            SubProcess.SendMagicMessage("GetDeviceCode", previousCodeWasIncorrect);
-            return Task.FromResult(SubProcess.WaitForResponse());
+            DepotDownloaderApi.SendMagicMessage("GetDeviceCode", previousCodeWasIncorrect);
+            return Task.FromResult(DepotDownloaderApi.WaitForResponse());
         }
 
         public Task<string> GetEmailCodeAsync(string email, bool previousCodeWasIncorrect)
         {
-            SubProcess.SendMagicMessage("GetEmailCode", email, previousCodeWasIncorrect);
-            return Task.FromResult(SubProcess.WaitForResponse());
+            DepotDownloaderApi.SendMagicMessage("GetEmailCode", email, previousCodeWasIncorrect);
+            return Task.FromResult(DepotDownloaderApi.WaitForResponse());
         }
 
         public Task<bool> AcceptDeviceConfirmationAsync()
         {
-            SubProcess.SendMagicMessage("AcceptDeviceConfirmation");
-            return Task.FromResult(Convert.ToBoolean(SubProcess.WaitForResponse()));
+            DepotDownloaderApi.SendMagicMessage("AcceptDeviceConfirmation");
+            return Task.FromResult(Convert.ToBoolean(DepotDownloaderApi.WaitForResponse()));
         }
     }
 }

@@ -10,7 +10,7 @@ This avoids many pitfalls of calling the original utility that has been specific
 Original code remains largely unchanged to facilitate easy sync with upstream.
 
 > [!WARNING]
-> Does not support trimming or AOT - this stems from DepotDownloader itself.  
+> Does not support trimming or AOT - this stems from DepotDownloader itself.
 > Make sure `<PublishTrimmed>` and `<PublishAot>` are not true.
 
 ## Usage
@@ -29,11 +29,11 @@ public static int Main(string[] args)
 }
 ```
 ### App download
-Prepare call:
+Prepare inputs:
 ```c#
-CancellationTokenSource cts = new CancellationTokenSource();
-
-var cfg = new DepotDownloader.AppDownloadConfig
+var cts = new CancellationTokenSource();
+var authenticator = new UserConsoleAuthenticator();
+var cfg = new AppDownloadConfig
 {
     // AccountSettingsFileName = "custom.config",
     // Username = "user",
@@ -43,53 +43,68 @@ var cfg = new DepotDownloader.AppDownloadConfig
     AppId = 244310
 };
 ```
-Method A) Using an async enumerable:
+Method **A**) Using an async enumerable:
 ```c#
-int? exitCode = null;
-await foreach ((string message, bool error) in DepotDownloader.SubProcess.AppDownload(
-        cfg, ec => exitCode = ec, new UserConsoleAuthenticator(), cts.Token))
+try
 {
-    Console.WriteLine("DepotDownloader: " + message);
+    await foreach (var (message, isError) in DepotDownloaderApi.AppDownload(cfg, authenticator, cts.Token))
+    {
+        Console.WriteLine("DepotDownloader: " + message);
+    }
 }
-
-if (exitCode != DepotDownloader.SubProcess.Success)
+catch (DepotDownloaderApiException e)
 {
-    Console.WriteLine("Download failed");
+    Console.WriteLine("Download failed: " + e.Message);
 }
 ```
-Method B) Using a task and message callbacks:
+Method **B**) Using a task and message callbacks:
 ```c#
 void MessageHandler(object sender, DataReceivedEventArgs e)
 {
     if (e.Data != null) Console.WriteLine("DepotDownloader: " + e.Data);
 }
 
-int exitCode = await DepotDownloader.SubProcess.AppDownload(
-        cfg, MessageHandler, MessageHandler, new UserConsoleAuthenticator(), cts.Token);
-
-if (exitCode != DepotDownloader.SubProcess.Success)
+try
 {
-    Console.WriteLine("Download failed");
+    await DepotDownloaderApi.AppDownload(cfg, MessageHandler, MessageHandler, authenticator, cts.Token);
+}
+catch (DepotDownloaderApiException e)
+{
+    Console.WriteLine("Download failed: " + e.Message);
 }
 ```
 ### Pubfile (Workshop) download
 Pubfile download is similiar to App download, but uses `PubFileDownloadConfig` :
 ```c#
-var cfg = new DepotDownloader.PubFileDownloadConfig
+var cfg = new PubFileDownloadConfig
 {
     AppId = ...,
     PublishedFileId = ...
 };
-DepotDownloader.SubProcess.PubFileDownload(cfg, ...)
+... DepotDownloaderApi.PubFileDownload(cfg, ...)
 ```
 
 ### UGC (Workshop) download
 UGC download is similiar to App download, but uses `UGCDownloadConfig` :
 ```c#
-var cfg = new DepotDownloader.UGCDownloadConfig
+var cfg = new UGCDownloadConfig
 {
     AppId = ...,
     UGCId = ...
 };
-DepotDownloader.SubProcess.UGCDownload(cfg, ...)
+... DepotDownloaderApi.UGCDownload(cfg, ...)
+```
+
+### Get app Build ID
+Returns most recent build ID for an app and a branch (default: public)
+```c#
+var cfg = new GetAppBuildIdConfig { AppId = ... };
+try
+{
+    uint buildId = await DepotDownloaderApi.GetAppBuildId(cfg);
+}
+catch (DepotDownloaderApiException e)
+{
+    Console.WriteLine("Build ID check failed: " + e.Message);
+}
 ```

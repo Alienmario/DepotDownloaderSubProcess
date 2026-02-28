@@ -13,9 +13,14 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="DepotDownloader.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <PackageId>DepotDownloaderSubProcess</PackageId>
-    <Version>3.4.0</Version>
+    <VersionPrefix>3.4.0</VersionPrefix>
+    <VersionSuffix>sp1</VersionSuffix>
     <Description>Library for running "Steam depot downloader" in a sub-process.</Description>
     <Authors>Alienmario, SteamRE Team</Authors>
     <Copyright>Copyright © SteamRE Team 2025</Copyright>
