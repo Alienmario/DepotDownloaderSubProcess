@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualBasic;
@@ -37,12 +38,6 @@ namespace DepotDownloader
     {
         public uint AppId { get; set; }
         public ulong UGCId { get; set; }
-    }
-
-    public class GetAppBuildIdConfig
-    {
-        public uint AppId { get; set; }
-        public string Branch { get; set; } = ContentDownloader.DEFAULT_BRANCH;
     }
 
     public class DepotDownloaderApiException(int code, string? message) : Exception(message)
@@ -134,12 +129,28 @@ namespace DepotDownloader
         }
 
         /// <exception cref="DepotDownloaderApiException"></exception>
-        public static Task<uint> GetAppBuildId(
-            GetAppBuildIdConfig config,
+        public static async Task<uint> GetAppBuildId(
+            uint appId,
+            string branch = ContentDownloader.DEFAULT_BRANCH,
             CancellationToken cancellationToken = default)
         {
-            return ExecInProcess<uint>(GetAppBuildIdInner, config, null, null, null, cancellationToken);
+            var branches = await GetAppBranches(appId, cancellationToken).ConfigureAwait(false);
+            return branches.Find(b => string.Equals(b.Name, branch, StringComparison.OrdinalIgnoreCase))?.BuildId ?? 0;
         }
+
+        /// <exception cref="DepotDownloaderApiException"></exception>
+        public static Task<List<AppBranchInfo>> GetAppBranches(
+            uint appId,
+            CancellationToken cancellationToken = default)
+        {
+            return ExecInProcess<List<AppBranchInfo>>(GetAppBranchesInner, appId, null, null, null, cancellationToken)!;
+        }
+
+        /// <summary>
+        /// Reads local install status from the metadata in <c>.DepotDownloader/depot.json</c>.
+        /// </summary>
+        public static LocalInstallInfo GetLocalInstallInfo(string installPath)
+            => LocalInstallInfo.Load(installPath);
 
         private static async Task<int> AppDownloadInner(string[] input)
         {
@@ -232,9 +243,9 @@ namespace DepotDownloader
             }
         }
 
-        private static Task<int> GetAppBuildIdInner(string[] input)
+        private static Task<int> GetAppBranchesInner(string[] input)
         {
-            var cfg = InitSubProcess<GetAppBuildIdConfig>(input);
+            var appId = InitSubProcess<uint>(input);
 
             if (!ContentDownloader.InitializeSteam3(null, null))
             {
@@ -243,8 +254,8 @@ namespace DepotDownloader
 
             try
             {
-                var buildId = ContentDownloader.GetSteam3AppBuildNumber(cfg.AppId, cfg.Branch);
-                SetReturnValue(buildId);
+                var branches = ContentDownloader.GetSteam3AppBranches(appId);
+                SetReturnValue(branches);
                 return Task.FromResult(0);
             }
             catch (Exception e)
@@ -476,14 +487,22 @@ namespace DepotDownloader
 
         private static string Serialize(object obj)
         {
-            return JsonSerializer.Serialize(obj);
+            return JsonSerializer.Serialize(obj, obj.GetType(), DepotDownloaderApiJsonContext.Default);
         }
 
         private static T Deserialize<T>(string str)
         {
-            return JsonSerializer.Deserialize<T>(str)!;
+            return (T)JsonSerializer.Deserialize(str, typeof(T), DepotDownloaderApiJsonContext.Default)!;
         }
     }
+
+    [JsonSourceGenerationOptions(IncludeFields = true)]
+    [JsonSerializable(typeof(AppDownloadConfig))]
+    [JsonSerializable(typeof(PubFileDownloadConfig))]
+    [JsonSerializable(typeof(UGCDownloadConfig))]
+    [JsonSerializable(typeof(uint))]
+    [JsonSerializable(typeof(List<AppBranchInfo>))]
+    internal partial class DepotDownloaderApiJsonContext : JsonSerializerContext { }
 
     internal class SubProcessAuthenticator : IAuthenticator
     {

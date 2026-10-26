@@ -17,6 +17,15 @@ using SteamKit2.CDN;
 
 namespace DepotDownloader
 {
+    public class AppBranchInfo
+    {
+        public string Name { get; set; } = string.Empty;
+        public uint BuildId { get; set; }
+        public string Description { get; set; }
+        public bool PasswordRequired { get; set; }
+        public DateTimeOffset? TimeUpdated { get; set; }
+    }
+
     class ContentDownloaderException(string value) : Exception(value)
     {
     }
@@ -30,12 +39,14 @@ namespace DepotDownloader
 
         public static DownloadConfig Config = new();
         public static IAuthenticator Authenticator = new UserConsoleAuthenticator();
+        public static LocalInstallInfo InstallInfo = new();
 
         private static Steam3Session steam3;
         private static CDNClientPool cdnPool;
 
         private const string DEFAULT_DOWNLOAD_DIR = "depots";
-        private const string CONFIG_DIR = ".DepotDownloader";
+        internal const string CONFIG_DIR = ".DepotDownloader";
+        internal const string DEPOT_CONFIG_FILE = "depot.json";
         private static readonly string STAGING_DIR = Path.Combine(CONFIG_DIR, "staging");
 
         private static readonly FrozenSet<EWorkshopFileType> SupportedWorkshopFileTypes = FrozenSet.ToFrozenSet(new[]
@@ -186,10 +197,10 @@ namespace DepotDownloader
             if (appId == INVALID_APP_ID)
                 return 0;
 
-            // DepotDownloaderSubProcess: init for GetAppBuildId
-            Task.Run(async () => await steam3!.RequestAppInfo(appId)).Wait();
-
             var depots = GetSteam3AppSection(appId, EAppInfoSection.Depots);
+            if (depots == null)
+                return 0;
+
             var branches = depots["branches"];
             var node = branches[branch];
 
@@ -202,6 +213,47 @@ namespace DepotDownloader
                 return 0;
 
             return uint.Parse(buildid.Value);
+        }
+
+        // DepotDownloaderSubProcess: new method
+        internal static List<AppBranchInfo> GetSteam3AppBranches(uint appId)
+        {
+            if (appId == INVALID_APP_ID)
+                return [];
+
+            Task.Run(async () => await steam3!.RequestAppInfo(appId)).Wait();
+
+            var depots = GetSteam3AppSection(appId, EAppInfoSection.Depots);
+            if (depots == null)
+                return [];
+
+            var branches = depots["branches"];
+            if (branches == KeyValue.Invalid)
+                return [];
+
+            var result = new List<AppBranchInfo>(branches.Children.Count);
+            foreach (var branch in branches.Children)
+            {
+                if (branch.Name == null)
+                    continue;
+
+                var buildId = branch["buildid"].AsUnsignedInteger();
+                var description = branch["description"].Value;
+                var pwdRequired = branch["pwdrequired"].AsBoolean();
+                var ts = branch["timeupdated"].AsLong();
+                var timeUpdated = ts > 0 ? DateTimeOffset.FromUnixTimeSeconds(ts) : (DateTimeOffset?)null;
+
+                result.Add(new AppBranchInfo
+                {
+                    Name = branch.Name,
+                    BuildId = buildId,
+                    Description = description,
+                    PasswordRequired = pwdRequired,
+                    TimeUpdated = timeUpdated
+                });
+            }
+
+            return result;
         }
 
         static uint GetSteam3DepotProxyAppId(uint depotId, uint appId)
@@ -467,7 +519,9 @@ namespace DepotDownloader
             }
 
             Directory.CreateDirectory(Path.Combine(configPath, CONFIG_DIR));
-            DepotConfigStore.LoadFromFile(Path.Combine(configPath, CONFIG_DIR, "depot.config"));
+            InstallInfo = LocalInstallInfo.Load(configPath);
+            InstallInfo.AppId = appId;
+            InstallInfo.Branch = branch;
 
             await steam3?.RequestAppInfo(appId);
 
@@ -486,6 +540,10 @@ namespace DepotDownloader
                     throw new ContentDownloaderException(string.Format("App {0} ({1}) is not available from this account.", appId, contentName));
                 }
             }
+
+            InstallInfo.BuildId = !isUgc && depotManifestIds.All(x => x.manifestId == INVALID_MANIFEST_ID)
+                ? GetSteam3AppBuildNumber(appId, branch)
+                : null;
 
             var hasSpecificDepots = depotManifestIds.Count > 0;
             var depotIdsFound = new List<uint>();
@@ -765,11 +823,18 @@ namespace DepotDownloader
             var configDir = Path.Combine(depot.InstallDir, CONFIG_DIR);
 
             var lastManifestId = INVALID_MANIFEST_ID;
-            DepotConfigStore.Instance.InstalledManifestIDs.TryGetValue(depot.DepotId, out lastManifestId);
+            if (InstallInfo.Depots.TryGetValue(depot.DepotId, out var existingEntry) && existingEntry.ManifestId != null)
+            {
+                lastManifestId = existingEntry.ManifestId.Value;
+            }
 
             // In case we have an early exit, this will force equiv of verifyall next run.
-            DepotConfigStore.Instance.InstalledManifestIDs[depot.DepotId] = INVALID_MANIFEST_ID;
-            DepotConfigStore.Save();
+            InstallInfo.Depots[depot.DepotId] = new LocalDepotInstallInfo
+            {
+                DepotId = depot.DepotId,
+                ManifestId = null
+            };
+            InstallInfo.Save();
 
             if (lastManifestId != INVALID_MANIFEST_ID)
             {
@@ -1017,8 +1082,12 @@ namespace DepotDownloader
                 }
             }
 
-            DepotConfigStore.Instance.InstalledManifestIDs[depot.DepotId] = depot.ManifestId;
-            DepotConfigStore.Save();
+            InstallInfo.Depots[depot.DepotId] = new LocalDepotInstallInfo
+            {
+                DepotId = depot.DepotId,
+                ManifestId = depot.ManifestId
+            };
+            InstallInfo.Save();
 
             Console.WriteLine("Depot {0} - Downloaded {1} bytes ({2} bytes uncompressed)", depot.DepotId, depotCounter.depotBytesCompressed, depotCounter.depotBytesUncompressed);
         }

@@ -9,6 +9,9 @@ A C# API wrapping `Steam depot downloader` in a sub-process utilizing `Tmds.Exec
 This avoids many pitfalls of calling the original utility that has been specifically written for CLI usage.
 Original code remains largely unchanged to facilitate easy sync with upstream.
 
+> [!NOTE]
+> **Install Metadata Format:** Unlike upstream DepotDownloader, which stores local depot configuration as deflate-compressed protobuf in `.DepotDownloader/depot.config`, this project stores richer local install metadata (`AppId`, `Branch`, `BuildId`, and per-depot `ManifestId` and completion state) as JSON in `.DepotDownloader/depot.json` via `LocalInstallInfo` (queryable with `DepotDownloaderApi.GetLocalInstallInfo`).
+
 > [!WARNING]
 > Does not support trimming or AOT - this stems from DepotDownloader itself.
 > Make sure `<PublishTrimmed>` and `<PublishAot>` are not true.
@@ -96,15 +99,41 @@ var cfg = new UGCDownloadConfig
 ```
 
 ### Get app Build ID
-Returns most recent build ID for an app and a branch (default: public)
+Returns most recent build ID for an app and a branch (default: public)  
+Internally delegates to GetAppBranches call.
 ```c#
-var cfg = new GetAppBuildIdConfig { AppId = ... };
 try
 {
-    uint buildId = await DepotDownloaderApi.GetAppBuildId(cfg);
+    uint buildId = await DepotDownloaderApi.GetAppBuildId(appId);
 }
 catch (DepotDownloaderApiException e)
 {
     Console.WriteLine("Build ID check failed: " + e.Message);
+}
+```
+
+### Get app branches
+Returns a list of available branches and their details (`Name`, `BuildId`, `Description`, `PasswordRequired`, `TimeUpdated`) for an app:
+```c#
+try
+{
+    List<AppBranchInfo> branches = await DepotDownloaderApi.GetAppBranches(appId);
+}
+catch (DepotDownloaderApiException e)
+{
+    Console.WriteLine("Branch check failed: " + e.Message);
+}
+```
+
+### Get local install info
+Reads local install status (`State`, `AppId`, `Branch`, `BuildId`, `Depots`) from the metadata in `.DepotDownloader/depot.json`:
+```c#
+try
+{
+    LocalInstallInfo installInfo = DepotDownloaderApi.GetLocalInstallInfo("C:/apps/244310");
+}
+catch (DepotDownloaderApiException e)
+{
+    Console.WriteLine("Failed to read install info: " + e.Message);
 }
 ```
